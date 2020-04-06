@@ -1,0 +1,244 @@
+---
+title: "Finance in R"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library('Quandl')
+```
+
+## Data
+
+We can use Quandl for testing and go to baruch and use the bloomberg when we need to get data for going to production.
+Also, there are a large number of free Quandl datasets which might be useful as well.
+
+Paying for Quandl is also a possibility to consider.
+
+```{r eval =F}
+install.packages("Quandl")
+library('Quandl')
+```
+
+Note that you need to know the "Quandl code" of each dataset you download.
+
+My Quandl API key is
+```{r}
+Q_API <- 'eCzy_AZyo5Rhjmb6gNsx'
+
+Quandl.api_key(Q_API)
+```
+
+
+`WIKI` end of day stock prices, dividends, splits for 3,000 US companies **table** no longer supported as of march 2018 
+
+`CBOE` chicago board options exchange
+
+`FRED` federeral reserve economic data **time-series**
+
+there are
+
+## Time series and datatables
+
+A **time-series** is a collection of observations or measurements taken over a period of time, generally in equal intervals. Time-series only contain numeric data types and are indexed by one date field. In other words, time-series data are always sortable by date. Through our API calls, users can retrieve the entire time-series or any slice of it.
+
+zoo, xts, and ts have their own time-series date formats
+
+While time-series only contain sorted numeric values,**tables** can include various unsorted data types (strings, numbers, dates, etc.) and can be filtered by different fields
+
+To request a specific type, assign the type argument and the return type.
+For example: 
+
+`NSE` is the stock exchange of india and OIl is one of their largest oil companies
+
+```{r}
+data <- Quandl('NSE/OIL', type = "xts")
+head(data)
+```
+
+## example: Apple
+
+When looking at the price data, note that this adjusts for stock splits. Company perform stock splits to keep their prices reasonable, of course this is just a matter of convention (amazon trades at 1700 because it doesn't think stock splits are important).
+
+However, when you look at the historical price time series, you may see very low numbers - which don't reflect the prices at the time, but are because of the stock split adjustments.
+
+
+```{r}
+data <- Quandl("WIKI/AAPL")
+plot(data$Date,data$`Adj. Close`,type = 'l',main = "APPL adjusted share daily close price")
+```
+
+the data adjusted for stock splits is usually what you want. (so the stock splitting is accounted for, keep this in mind)
+
+let's look at log returns (daily), you will need the minus sign to make sure you are subtracting (dividing) the present price over the past price
+
+``` {r}
+returns <- -diff(log(data$`Adj. Close`)) #note the minus sign
+plot(returns[1:2000],type='l')
+hist(returns[1:2000],n=100)
+```
+
+
+note that stock prices ~ lognormal distributed
+
+$$y_t \sim y_{t-1} \log N(\mu_{daily},\sigma^2_{daily})$$
+
+but log-returns ~ normal distributed
+
+for small movements log-returns are similar to returns. argument is $\log(1+x) \approx x$ for small $x$ and $x =\frac{y_t-y_{t-1}}{y_{t-1}} = \frac{y_t}{y_{t-1}}-1$ is usually small $\sim 0.01$ so $\log(\frac{y_t}{y_{t-1}})= \log(1+x) \approx \frac{y_t-y_{t-1}}{y_{t-1}}$
+
+which is basically just showing that log returns are about the same as absolute returns for small movements, this is why you can say "returns" are normally distributed, while prices are lognormal.
+
+
+``` {r}
+prices <- data$`Adj. Close`
+hist(prices[1:2000],n=100)
+mean(returns[1:2000])     # mean return
+```
+
+
+that means the average daily return on AAPL stock was only about 0.1%.
+
+However, let's think about this, what happens if you have a 0.1% return over 10 years with 250 trading days per year?
+
+that should be compounded so that you should get 
+
+$$R = (1+0.001)^{2500} \approx 12$$
+
+That means you would increase your investment by a factor of 12 over those 10 years, which is actually the case approximiatly for Apple. 
+
+
+This is a good example of how daily returns function over time...
+
+you can look at some other examples
+
+Next we want to look at market effects
+
+## Correlation to the market $\beta$
+
+So next let's put apple against the SP500 and compare. What we want to do is compare daily log return of assett to daily log return of the market (SP500). The linear model is
+
+ $$r_a = \alpha + \beta r_b$$
+ 
+  \vspace{0.15cm}
+
+$r_a$ is the return of the asset
+
+ \vspace{0.15cm}
+ 
+ $\alpha$ is the active return
+ 
+  \vspace{0.15cm}
+ 
+ $r_b$ is the return of the benchmark
+
+\vspace{0.15cm}
+
+This can be written as
+
+
+$$\beta = \rho_{a,b} \frac{\sigma_a}{\sigma_b}$$
+
+
+We need to do some data wrangling to make sure we are comparing the same days returns...
+
+```{r}
+sp500 = read.csv("GSPC.csv",stringsAsFactors = FALSE) # watchout for factors
+sp500$Date=as.Date(sp500$Date)  # we need to work with the right type - Dates
+head(sp500)
+plot(sp500$Date,sp500$Adj.Close,type='l')
+```
+
+
+let's select a data range from the dataframe to work with
+
+
+
+```{r}
+sp_filtered <- sp500[sp500$Date > "2006-01-01" & sp500$Date < "2018-01-01",]
+nrow(sp_filtered)
+head(sp_filtered)
+
+apple_filtered <- data[data$Date >= "2006-01-01" & data$Date <= "2018-01-01",]
+nrow(apple_filtered)
+head(apple_filtered)
+returns <- -diff(log(apple_filtered$`Adj. Close`))
+
+```
+
+we want to make sure we are comparing the same day so lets do some extra checks
+
+```{r}
+
+setdiff(rev(sp_filtered$Date), apple_filtered$Date)
+
+sp_filtered <- sp_filtered[!sp_filtered$Date == "2017-11-08",]
+
+sp_filtered <- sp_filtered[!sp_filtered$Date == "2017-08-07",]
+```
+
+This result indicates that there are some missing days for Apple, so we removed those days from the S & P so we can compare.
+So next we will need the the log returns for SP500
+
+```{r}
+sp_reversed <- rev(sp_filtered$Adj.Close)
+sp_returns <- -diff(log(sp_reversed)) #note the minus sign
+plot(sp_returns,type='l')
+hist(sp_returns,n=100)
+mean(returns)        # apple over the time period
+mean(sp_returns)     # mean return
+
+```
+
+
+
+
+```{r}
+fit = lm(returns ~ sp_returns)
+summary(fit)
+cor(returns,sp_returns)
+cor(returns,sp_returns)*sd(returns)/sd(sp_returns)
+```
+
+What is this telling us? Well it's basically saying that Apples daily active return (the intercetp) over the time period is about  $\alpha = 0.00071$  while the return related to the market is $\beta r_b = 0.97 \times 0.0002465$ This means that the active daily return for apple over the time period is $\frac{0.00071}{.00095} \approx 0.75$ while the return related to the market is $\frac{0.977 \times 0.000247}{.00095} \approx 0.25$. So, you basically decomposed the return into 75% idiosyncratic and 25% just the rising market tide.
+
+```{r}
+plot(sp_returns,returns)
+```
+
+
+## black scholes prices
+
+let's try to see how close we get with `library(ragtop)`, choosing correct inputs to the formula is the tricky thing. Syntax `american(callput,S0,K...)` callput is 1 for call, -1 for put.
+
+```{r message=F}
+library('ragtop')
+callput <- 1
+S0 <- 221.04
+K <- 220
+time <- 0.25
+const_short_rate <- 0.0195
+const_volatility <- 0.26
+american(callput=1, S0=S0, K=K, time=time, const_short_rate=const_short_rate,const_volatility=const_volatility)
+```
+
+
+compare this to the ask bid of about $12.20 I found on fidelity, it's almost exactly the same
+## Seasonality
+
+## alternative data models
+
+## univariate ARIMA modeling
+
+## forecasting
+
+## Deep learning on AWS
+
+## GARCH 
+
+## stochastic volatility
+
+
+
+
+
